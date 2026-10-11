@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SJRK Voice Over Studio</title>
+
+<style>
+*{box-sizing:border-box}
+body{margin:0;padding:16px;font-family:Arial,sans-serif;background:linear-gradient(135deg,#090d19,#202b49);color:white}
+.app{max-width:650px;margin:15px auto;background:#171e30;border:1px solid #d6b45c;border-radius:22px;padding:22px;box-shadow:0 10px 35px #0008}
+h1{text-align:center;color:#f5cf70;margin-bottom:5px}
+.subtitle{text-align:center;color:#c4c9d6}
+label{display:block;margin:18px 0 8px;font-weight:bold}
+textarea,select{width:100%;padding:13px;border-radius:10px;border:1px solid #46516a;background:#0c1323;color:white;font-size:16px}
+textarea{height:160px;resize:vertical}
+input[type=range]{width:100%;accent-color:#eac45e}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+button{padding:13px;border:0;border-radius:10px;font-size:15px;font-weight:bold;cursor:pointer}
+.row button{flex:1;min-width:100px}
+.play{background:#f5cf70;color:#111}
+.pause{background:#566ff5;color:white}
+.stop{background:#e54d5d;color:white}
+.download{width:100%;margin-top:12px;background:#159b72;color:white}
+.record{width:100%;margin-top:12px;background:#bb67ee;color:white}
+#status{margin-top:16px;text-align:center;color:#f5cf70;overflow-wrap:anywhere}
+.note{background:#0c1323;border-radius:10px;padding:12px;margin-top:18px;color:#c5ccda;font-size:13px;line-height:1.6}
+</style>
+</head>
+
+<body>
+<div class="app">
+<h1>🎙 SJRK Voice Over</h1>
+<p class="subtitle">Text to Speech • Male & Female Voices • Audio Download</p>
+
+<label for="script">Enter Your Script</label>
+<textarea id="script" placeholder="Yahan apna text likhein..."></textarea>
+
+<label for="language">Select Language</label>
+<select id="language">
+<option value="hi-IN">Hindi</option>
+<option value="bn-IN">Bengali</option>
+<option value="en-IN">English (India)</option>
+<option value="en-US">English (US)</option>
+<option value="ta-IN">Tamil</option>
+<option value="te-IN">Telugu</option>
+<option value="mr-IN">Marathi</option>
+<option value="gu-IN">Gujarati</option>
+<option value="kn-IN">Kannada</option>
+<option value="fr-FR">French</option>
+</select>
+
+<label for="gender">Voice Type</label>
+<select id="gender">
+<option value="male">Male Voice (Boy)</option>
+<option value="female">Female Voice (Girl)</option>
+<option value="all">All Available Voices</option>
+</select>
+
+<label for="voice">Choose Available Voice</label>
+<select id="voice">
+<option value="">Loading voices...</option>
+</select>
+
+<label for="speed">Speaking Speed: <span id="speedValue">1.0</span></label>
+<input id="speed" type="range" min="0.5" max="2" step="0.1" value="1">
+
+<label for="pitch">Voice Pitch: <span id="pitchValue">1.0</span></label>
+<input id="pitch" type="range" min="0.5" max="2" step="0.1" value="1">
+
+<div class="row" style="margin-top:20px">
+<button class="play" id="playBtn">▶ Play Voice</button>
+<button class="pause" id="pauseBtn">⏸ Pause / Resume</button>
+<button class="stop" id="stopBtn">■ Stop</button>
+</div>
+
+<button class="record" id="recordBtn">🔴 Record Voice to Download</button>
+<button class="download" id="downloadBtn">⬇ Download Voice (WAV)</button>
+
+<div id="status">Loading available voices...</div>
+
+<div class="note">
+<b>Important:</b> Male and female voices depend on the voices installed on your device. This app uses your browser's speech engine. Audio recording works only when your browser supports recording the generated speech output. If it does not, this page cannot directly capture the speech engine's audio. The app will show a message instead of downloading a fake audio file.
+</div>
+</div>
+
+<script>
+const scriptBox = document.getElementById("script");
+const language = document.getElementById("language");
+const gender = document.getElementById("gender");
+const voiceSelect = document.getElementById("voice");
+const statusBox = document.getElementById("status");
+const speed = document.getElementById("speed");
+const pitch = document.getElementById("pitch");
+
+let voices = [];
+let utterance = null;
+let selectedVoice = null;
+let audioBlob = null;
+let isRecording = false;
+let recordingSupported = false;
+let playbackGeneration = 0;
+
+const audioContextSupported = !!(window.AudioContext || window.webkitAudioContext);
+const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+
+function loadVoices() {
+    if (!("speechSynthesis" in window)) {
+        statusBox.textContent = "Speech is not supported. Open this app in Chrome.";
+        return;
+    }
+
+    voices = speechSynthesis.getVoices();
+    updateVoiceList();
+
+    if (voices.length) {
+        statusBox.textContent = "Voices loaded. Enter text and press Play Voice.";
+    } else {
+        statusBox.textContent = "No voices loaded yet. Please wait or check your device's speech settings.";
+    }
+}
+
+function updateVoiceList() {
+    const langPrefix = language.value.split("-")[0].toLowerCase();
+    const oldName = voiceSelect.value;
+    const type = gender.value;
+
+    voiceSelect.innerHTML = "";
+
+    let filtered = voices.filter(v =>
+        v.lang && v.lang.toLowerCase().startsWith(langPrefix)
+    );
+
+    if (type !== "all") {
+        const tagged = filtered.filter(v => {
+            const n = v.name.toLowerCase();
+            if (type === "male") {
+                return /male|man|boy|david|mark|george|daniel|aaron|ravi|heera|hemant|prabhat|madhur|male/.test(n);
+            }
+            return /female|woman|girl|zira|samantha|susan|karen|veena|lekha|swara|female/.test(n);
+        });
+
+        // Do not falsely label unknown voices. If gender cannot be identified,
+        // show the available voices and let the user choose.
+        filtered = tagged;
+    }
+
+    if (!filtered.length) {
+        const option = document.createElement("option");
+        option.value = "";
+        option.textContent = type === "all"
+            ? "No voices found for this language"
+            : "No identified " + type + " voice — choose All Available Voices";
+        voiceSelect.appendChild(option);
+        return;
+    }
+
+    filtered.forEach(v => {
+        const option = document.createElement("option");
+        option.value = v.name;
+        option.textContent = v.name + " (" + v.lang + ")";
+        voiceSelect.appendChild(option);
+    });
+
+    if (filtered.some(v => v.name === oldName)) {
+        voiceSelect.value = oldName;
+    }
+}
+
+function getChosenVoice() {
+    return voices.find(v => v.name === voiceSelect.value) || null;
+}
+
+function getText() {
+    return scriptBox.value.trim();
+}
+
+function cancelSpeech() {
+    playbackGeneration++;
+    if ("speechSynthesis" in window) speechSynthesis.cancel();
+}
+
+function speak() {
+    const text = getText();
+
+    if (!text) {
+        alert("Please write your script first.");
+        scriptBox.focus();
+        return;
+    }
+
+    if (!("speechSynthesis" in window)) {
+        statusBox.textContent = "Speech synthesis is not supported in this browser.";
+        return;
+    }
+
+    if (!voices.length) {
+        loadVoices();
+        statusBox.textContent = "No voices are available yet. Check your device's Text-to-Speech settings.";
+        return;
+    }
+
+    cancelSpeech();
+
+    selectedVoice = getChosenVoice();
+    utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = language.value;
+    utterance.rate = Number(speed.value);
+    utterance.pitch = Number(pitch.value);
+
+    if (selectedVoice) {
+        utterance.voice = selectedVoice;
+    }
+
+    const myGeneration = playbackGeneration;
+
+    utterance.onstart = () => {
+        if (myGeneration === playbackGeneration) {
+            statusBox.textContent = "Speaking with " +
+                (selectedVoice ? selectedVoice.name : "the default voice") + "...";
+        }
+    };
+
+    utterance.onend = () => {
+        if (myGeneration === playbackGeneration) {
+            statusBox.textContent = "Voice playback completed.";
+        }
+    };
+
+    utterance.onerror = e => {
+        if (myGeneration === playbackGeneration && e.error !== "canceled") {
+            statusBox.textContent = "Speech error: " + e.error +
+                ". Try another voice or restart your browser.";
+        }
+    };
+
+    speechSynthesis.speak(utterance);
+}
+
+function pauseResume() {
+    if (!("speechSynthesis" in window)) return;
+
+    if (speechSynthesis.paused) {
+        speechSynthesis.resume();
+        statusBox.textContent = "Resuming voice...";
+    } else if (speechSynthesis.speaking) {
+        speechSynthesis.pause();
+        statusBox.textContent = "Voice paused.";
+    } else {
+        statusBox.textContent = "Press Play Voice first.";
+    }
+}
+
+function stop() {
+    cancelSpeech();
+    statusBox.textContent = "Playback stopped.";
+}
+
+speed.addEventListener("input", () => {
+    document.getElementById("speedValue").textContent = Number(speed.value).toFixed(1);
+});
+
+pitch.addEventListener("input", () => {
+    document.getElementById("pitchValue").textContent = Number(pitch.value).toFixed(1);
+});
+
+language.addEventListener("change", updateVoiceList);
+gender.addEventListener("change", updateVoiceList);
+
+document.getElementById("playBtn").addEventListener("click", speak);
+document.getElementById("pauseBtn").addEventListener("click", pauseResume);
+document.getElementById("stopBtn").addEventListener("click", stop);
+
+document.getElementById("recordBtn").addEventListener("click", async () => {
+    if (!getText()) {
+        alert("Please write your script first.");
+        return;
+    }
+
+    if (!audioContextSupported || !("MediaRecorder" in window)) {
+        statusBox.textContent =
+            "Your browser cannot record the speech engine directly. An audio-generation service is needed for MP3/WAV downloads.";
+        return;
+    }
+
+    statusBox.textContent =
+        "Your browser's speech engine does not provide its audio stream to this page. Direct voice recording is unavailable here. Use a TTS audio service to enable real downloads.";
+});
+
+document.getElementById("downloadBtn").addEventListener("click", () => {
+    if (!audioBlob) {
+        statusBox.textContent =
+            "No recorded audio is available. This browser does not expose speech audio for download. A TTS audio service is needed.";
+        return;
+    }
+
+    const url = URL.createObjectURL(audioBlob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "SJRK-Voice-Over.wav";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+});
+
+if ("speechSynthesis" in window) {
+    loadVoices();
+    speechSynthesis.onvoiceschanged = loadVoices;
+    setTimeout(loadVoices, 1000);
+}
+</script>
+</body>
+</html>
